@@ -44,6 +44,7 @@ try:
 except ModuleNotFoundError:
     pass
 
+from googletrans import Translator  # 追加: googletransライブラリのインポート
 
 class _CustomMarkdownify(markdownify.MarkdownConverter):
     """
@@ -59,6 +60,8 @@ class _CustomMarkdownify(markdownify.MarkdownConverter):
         options["heading_style"] = options.get("heading_style", markdownify.ATX)
         # Explicitly cast options to the expected type if necessary
         super().__init__(**options)
+
+        self.translator = Translator()  # 追加: Translatorインスタンスの作成
 
     def convert_hn(self, n: int, el: Any, text: str, convert_as_inline: bool) -> str:
         """Same as usual, but be sure to start with a new line"""
@@ -126,6 +129,15 @@ class _CustomMarkdownify(markdownify.MarkdownConverter):
     def convert_soup(self, soup: Any) -> str:
         return super().convert_soup(soup)  # type: ignore
 
+    def process_text(self, el):
+        text = super().process_text(el)
+        # 翻訳処理を追加
+        try:
+            translated = self.translator.translate(text, dest='ja')
+            text = translated.text
+        except Exception as e:
+            print(f"Translation failed: {e}")
+        return text
 
 class DocumentConverterResult:
     """The result of converting a document to text."""
@@ -881,6 +893,8 @@ class MarkItDown:
         self.register_page_converter(ImageConverter())
         self.register_page_converter(PdfConverter())
 
+        self.translator = Translator()  # 追加: Translatorインスタンスの作成
+
     def convert(
         self, source: Union[str, requests.Response], **kwargs: Any
     ) -> DocumentConverterResult:  # TODO: deal with kwargs
@@ -897,12 +911,12 @@ class MarkItDown:
                 or source.startswith("https://")
                 or source.startswith("file://")
             ):
-                return self.convert_url(source, **kwargs)
+                result = self.convert_url(source, **kwargs)
             else:
-                return self.convert_local(source, **kwargs)
+                result = self.convert_local(source, **kwargs)
         # Request response
         elif isinstance(source, requests.Response):
-            return self.convert_response(source, **kwargs)
+            result = self.convert_response(source, **kwargs)
 
     def convert_local(
         self, path: str, **kwargs: Any
@@ -964,6 +978,13 @@ class MarkItDown:
         # Send a HTTP request to the URL
         response = self._requests_session.get(url, stream=True)
         response.raise_for_status()
+        
+#       if kwargs.get("translate_to_japanese", True):
+#            # 翻訳を追加
+#            content = response.text
+#            translated_content = self.translate_to_japanese(content)
+#            response._content = translated_content.encode('utf-8')
+        
         return self.convert_response(response, **kwargs)
 
     def convert_response(
@@ -1099,3 +1120,22 @@ class MarkItDown:
     def register_page_converter(self, converter: DocumentConverter) -> None:
         """Register a page text converter."""
         self._page_converters.insert(0, converter)
+
+    def translate_to_japanese(self, html_content):
+        try:
+            # BeautifulSoupを使用してHTMLをパース
+            soup = BeautifulSoup(html_content, 'html.parser')
+            
+            # HTMLコンテンツをプレーンテキストに変換
+            plain_text = soup.get_text()
+            
+            # プレーンテキストを翻訳
+            translated = self.translator.translate(plain_text, dest='ja')
+            translated_text = translated.text
+            
+            # 翻訳後のテキストを再度HTMLに変換
+            translated_soup = BeautifulSoup(translated_text, 'html.parser')
+            return str(translated_soup)
+        except Exception as e:
+            print(f"Translation failed: {e}")
+            return html_content  # 翻訳に失敗した場合は元のHTMLコンテンツを返す
